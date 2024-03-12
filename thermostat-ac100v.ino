@@ -37,6 +37,7 @@ byte cmap_invT[8] =   {0b11111, 0b10001, 0b11011, 0b11011, 0b11011, 0b11011, 0b1
 #define MAXCS     10
 Adafruit_MAX31855 thermocouple(MAXCS);
 
+double curr_temp;
 unsigned long msec_update_curr_temp_last = 0;
 
 // リレー
@@ -72,9 +73,9 @@ short val_LO = 0, val_HI = 0;
 
 
 void setup() {
-  Serial.begin(9600);
-  while (!Serial) {;}
-  delay(100);
+  //Serial.begin(9600);
+  //while (!Serial) {;}
+  delay(500);
 
   // Init LCD_I2C
   lcd.init(); lcd.setBacklight(255); lcd.clear(); lcd.noCursor();
@@ -111,43 +112,47 @@ void setup() {
   if (!thermocouple.begin()) {
     mode_operation = ERROR; // 動作状態をエラーにする
   }
+  curr_temp = thermocouple.readCelsius();
 
   // LCD表示
   display_mode_operation();
   display_val_LO(); display_val_HI();
-  display_curr_temp();
+  display_curr_temp(curr_temp);
   display_mode_relay();
 }
 
 void loop() {
-  // 熱電対の状態監視
-  if (thermocouple.readError() != 0) { // なんらかのエラーが発生してる
-    mode_operation = ERROR; // エラー状態モードに遷移
-    mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを緊急断
-    display_mode_operation();
-  } else if (mode_operation == ERROR) { // 現状エラー状態モードだがエラーは発生していない
-    mode_operation = IDLE; // アイドル状態に遷移
-    display_mode_operation();
-  }
-
-  // 現在温度の表示
+  // 温度の表示と制御
   if (millis() > msec_update_curr_temp_last + 500) { // 前回更新時から500msec以上経過した
-    msec_update_curr_temp_last = millis();
-    display_curr_temp();
-  }
+    // 熱電対の状態監視
+    curr_temp = thermocouple.readCelsius();
+    if (isnan(curr_temp)) { // 温度が取得できてなかった
+      mode_operation = ERROR; // エラー状態モードに遷移
+      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを緊急断
+      display_mode_operation();
+    } else if (mode_operation == ERROR) { // 現状エラー状態モードだが温度を読めた（のでエラーから回復した）
+      mode_operation = IDLE; // アイドル状態に遷移
+      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // 念のためリレーを断
+      display_mode_operation();
+    }
 
-  // 温調
-  if (mode_operation == ACTIVE) {
-    double temp = thermocouple.readCelsius();
-    if (temp < val_LO) { // 現在温度がL設定を下回ってる
-      mode_relay = ON; digitalWrite(PIN_RELAY, HIGH); // リレーを入
-      display_mode_relay();
-    } else if (temp > val_HI) { // 現在温度がH設定を上回ってる
-      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを断
-      display_mode_relay();
+    // 温度表示
+    msec_update_curr_temp_last = millis();
+    display_curr_temp(curr_temp);
+
+    // 温調
+    if (mode_operation == ACTIVE) {
+      double temp = thermocouple.readCelsius();
+      if (temp < val_LO) { // 現在温度がL設定を下回ってる
+        mode_relay = ON; digitalWrite(PIN_RELAY, HIGH); // リレーを入
+        display_mode_relay();
+      } else if (temp > val_HI) { // 現在温度がH設定を上回ってる
+        mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを断
+        display_mode_relay();
+      }
     }
   }
-
+  
   // ボタン動作のロジック
   // ACTボタン
   if (status_button_act == CLICK) {
@@ -219,11 +224,8 @@ void loop() {
     if (mutex_button == POS) on_button_pos_hold(); // 長押しリピート処理を呼び出す
     msec_button_pos_last = millis(); // 前回ボタンイベント時刻を更新
   }
-
   
-  
-  
-}
+} // END of loop
 
 // LCD表示
 void display_mode_operation() {
@@ -281,16 +283,15 @@ void display_val_HI() {
   lcd.setCursor(14, 1);
 }
 
-void display_curr_temp() {
+void display_curr_temp(double temp) {
   lcd.setCursor(4, 0);
-  if (mode_operation == ERROR) { // エラー状態モードなら
+  if (isnan(temp)) { // 温度を取得できていなかった
     lcd.print("        "); lcd.setCursor(5, 0);
     uint8_t e = thermocouple.readError();
     if (e & MAX31855_FAULT_OPEN) lcd.print("TO"); // 回路オープン
     if (e & MAX31855_FAULT_SHORT_GND) lcd.print("SG"); // GNDショート
     if (e & MAX31855_FAULT_SHORT_VCC) lcd.print("SV"); // VCCショート
-  } else { // エラー状態モードでなければ
-    double temp = thermocouple.readCelsius();
+  } else { // 取得できていれば
     if (       temp <= -100.0) { lcd.print(temp);
     } else if (temp <= -10.0 ) { lcd.print("- "); lcd.print(abs(temp)); 
     } else if (temp <    0.0 ) { lcd.print("-  "); lcd.print(abs(temp));
@@ -341,6 +342,7 @@ void on_button_act_click() {
       break;
     case ACTIVE: // IDLEモードに遷移
       mode_operation = IDLE;
+      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // 念のためリレーを断
       display_mode_operation();
       break;
     case SETTING_TERM: // LOかHIの値設定モードに遷移
