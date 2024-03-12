@@ -6,22 +6,38 @@
 #define LCD_WIDTH 16
 volatile LiquidCrystal_I2C lcd(0x27, LCD_WIDTH , 2);
 
-byte deg[8] = {
-	0b00010,
-	0b00101,
-	0b00101,
-	0b00010,
-	0b00000,
-	0b00000,
-	0b00000,
-	0b00000
-};
+// for custom characters
+#define cc_degree 0
+#define cc_L      1
+#define cc_H      2
+#define cc_O      3
+#define cc_RMODE  4
+#define cc_OP_0   5
+#define cc_OP_1   6
+#define cc_OP_2   7
+
+byte cmap_degree[8] = {0b00010, 0b00101, 0b00101, 0b00010, 0b00000, 0b00000, 0b00000, 0b00000};
+byte cmap_invA[8] =   {0b11111,	0b11011, 0b10101, 0b10001, 0b10101, 0b10101, 0b11111, 0b00000};
+byte cmap_invC[8] =   {0b11111, 0b11011, 0b10101, 0b10111, 0b10101, 0b11011, 0b11111, 0b00000};
+byte cmap_invD[8] =   {0b11111, 0b10011, 0b10101, 0b10101, 0b10101, 0b10011, 0b11111, 0b00000};
+byte cmap_invE[8] =   {0b11111, 0b10001, 0b10111, 0b10001, 0b10111, 0b10001, 0b11111, 0b00000};
+byte cmap_invF[8] =   {0b11111, 0b10001, 0b10111, 0b10001, 0b10111, 0b10111, 0b11111, 0b00000};
+byte cmap_invH[8] =   {0b11111, 0b10101, 0b10101, 0b10001, 0b10101, 0b10101, 0b11111, 0b00000};
+byte cmap_invI[8] =   {0b11111, 0b11011, 0b11011, 0b11011, 0b11011, 0b11011, 0b11111, 0b00000};
+byte cmap_invL[8] =   {0b11111, 0b10111, 0b10111, 0b10111, 0b10111, 0b10001, 0b11111, 0b00000};
+byte cmap_invN[8] =   {0b11111, 0b10101, 0b10001, 0b10101, 0b10101, 0b10101, 0b11111, 0b00000};
+byte cmap_invO[8] =   {0b11111, 0b11011, 0b10101, 0b10101, 0b10101, 0b11011, 0b11111, 0b00000};
+byte cmap_invS[8] =   {0b11111, 0b11001, 0b10111, 0b11011, 0b11101, 0b10011, 0b11111, 0b00000};
+byte cmap_invT[8] =   {0b11111, 0b10001, 0b11011, 0b11011, 0b11011, 0b11011, 0b11111, 0b00000};
 
 // for Thermo-Couple
 #include <SPI.h>
 #include "Adafruit_MAX31855.h"
 #define MAXCS     10
 Adafruit_MAX31855 thermocouple(MAXCS);
+
+double curr_temp = 23.4;
+unsigned long msec_update_curr_temp_last = 0;
 
 // 動作定義
 enum Mode_operation {IDLE, ACTIVE, SETTING_TERM, SETTING_LO, SETTING_HI};
@@ -57,7 +73,12 @@ void setup() {
 
   // Init LCD_I2C
   lcd.init(); lcd.setBacklight(255); lcd.clear(); lcd.noCursor();
-  lcd.createChar(0, deg);
+
+  // カスタムキャラクタの設定（共通して使う分）
+  lcd.createChar(cc_degree, cmap_degree);
+  lcd.createChar(cc_H, cmap_invH);
+  lcd.createChar(cc_L, cmap_invL);
+  lcd.createChar(cc_O, cmap_invO);
 
   // EEPROMからLOとHIの設定値を取得
   EEPROM.get(0,val_LO); // 0-1番地に(short)LO
@@ -83,6 +104,13 @@ void setup() {
 }
 
 void loop() {
+  // 現在温度の表示
+  if (millis() > msec_update_curr_temp_last + 500) { // 前回更新時から500msec以上経過した
+    curr_temp += (random(3)-1.0)/10.0;
+    msec_update_curr_temp_last = millis();
+    display_curr_temp(curr_temp);
+  }
+
   // ボタン動作のロジック
   // ACTボタン
   if (status_button_act == CLICK) {
@@ -162,29 +190,34 @@ void loop() {
 
 // LCD表示
 void display_mode_operation() {
-    lcd.setCursor(0, 1); lcd.print("[L:");
-    lcd.setCursor(7, 1); lcd.print("][H:");
+    lcd.setCursor(0, 1); lcd.print("["); lcd.write(byte(cc_L)); lcd.print(" ");
+    lcd.setCursor(7, 1); lcd.print("]["); lcd.write(byte(cc_H)); lcd.print(" ");
     lcd.setCursor(15, 1); lcd.print("]");
   switch (mode_operation) {
     case IDLE:
-      lcd.setCursor(0, 0); lcd.print("IDL");
+      lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
       lcd.noCursor(); lcd.noBlink();
       break;
     case ACTIVE:
-      lcd.setCursor(0, 0); lcd.print("ACT");
+      lcd.createChar(cc_OP_0, cmap_invA); lcd.createChar(cc_OP_1, cmap_invC); lcd.createChar(cc_OP_2, cmap_invT); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
       lcd.noCursor(); lcd.noBlink();
       break;
     case SETTING_TERM:
-      lcd.setCursor(0, 0); lcd.print("SET");
+      lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
       lcd.setCursor((selected_term==LO)?1:9, 1); lcd.cursor(); lcd.blink();
       break;
     case SETTING_LO:
-      lcd.setCursor(0, 0); lcd.print("SET");
-      lcd.setCursor(6, 1); lcd.cursor(); lcd.blink();
+      lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
+      lcd.setCursor(6, 1); lcd.cursor(); lcd.noBlink();
       break;
     case SETTING_HI:
-      lcd.setCursor(0, 0); lcd.print("SET");
-      lcd.setCursor(14, 1); lcd.cursor(); lcd.blink();
+      lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
+      lcd.setCursor(14, 1); lcd.cursor(); lcd.noBlink();
       break;
   }
 }
@@ -219,7 +252,17 @@ void display_curr_temp(double temp) {
   } else if (temp <   10.0 ) { lcd.print("+  "); lcd.print(temp);
   } else if (temp <  100.0 ) { lcd.print("+ "); lcd.print(temp);
   } else {                     lcd.print("+"); lcd.print(temp); }
-  lcd.setCursor(10, 0); lcd.write(byte(0)); lcd.print("C");
+  lcd.setCursor(10, 0); lcd.write(byte(cc_degree)); lcd.print("C");
+  // カーソル位置の制御
+  switch (mode_operation) {
+    case SETTING_TERM:
+      lcd.setCursor((selected_term==LO)?1:9, 1); lcd.cursor(); lcd.blink(); break;
+    case SETTING_LO:
+      lcd.setCursor(6, 1); lcd.cursor(); lcd.noBlink(); break;
+    case SETTING_HI:
+      lcd.setCursor(14, 1); lcd.cursor(); lcd.noBlink(); break;
+    default: break;
+  }
 }
 
 
