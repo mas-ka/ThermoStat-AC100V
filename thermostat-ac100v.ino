@@ -1,12 +1,12 @@
 // EEPROM
 #include <EEPROM.h>
 
-// for LCD_I2C
+// I2C液晶
 #include <LiquidCrystal_I2C.h>
 #define LCD_WIDTH 16
 volatile LiquidCrystal_I2C lcd(0x27, LCD_WIDTH , 2);
 
-// for custom characters
+// カスタムキャラクタ
 #define cc_degree 0
 #define cc_L      1
 #define cc_H      2
@@ -26,21 +26,26 @@ byte cmap_invH[8] =   {0b11111, 0b10101, 0b10101, 0b10001, 0b10101, 0b10101, 0b1
 byte cmap_invI[8] =   {0b11111, 0b11011, 0b11011, 0b11011, 0b11011, 0b11011, 0b11111, 0b00000};
 byte cmap_invL[8] =   {0b11111, 0b10111, 0b10111, 0b10111, 0b10111, 0b10001, 0b11111, 0b00000};
 byte cmap_invN[8] =   {0b11111, 0b10101, 0b10001, 0b10101, 0b10101, 0b10101, 0b11111, 0b00000};
-byte cmap_invO[8] =   {0b11111, 0b11011, 0b10101, 0b10101, 0b10101, 0b11011, 0b11111, 0b00000};
+byte cmap_invO[8] =   {0b11111, 0b10001, 0b10101, 0b10101, 0b10101, 0b10001, 0b11111, 0b00000};
+byte cmap_invR[8] =   {0b11111, 0b10011, 0b10101, 0b10011, 0b10101, 0b10101, 0b11111, 0b00000};
 byte cmap_invS[8] =   {0b11111, 0b11001, 0b10111, 0b11011, 0b11101, 0b10011, 0b11111, 0b00000};
 byte cmap_invT[8] =   {0b11111, 0b10001, 0b11011, 0b11011, 0b11011, 0b11011, 0b11111, 0b00000};
 
-// for Thermo-Couple
+// 熱電対
 #include <SPI.h>
 #include "Adafruit_MAX31855.h"
 #define MAXCS     10
 Adafruit_MAX31855 thermocouple(MAXCS);
 
-double curr_temp = 23.4;
 unsigned long msec_update_curr_temp_last = 0;
 
+// リレー
+#define PIN_RELAY 9
+enum Mode_Relay {OFF, ON};
+Mode_Relay mode_relay = OFF;
+
 // 動作定義
-enum Mode_operation {IDLE, ACTIVE, SETTING_TERM, SETTING_LO, SETTING_HI};
+enum Mode_operation {ERROR, IDLE, ACTIVE, SETTING_TERM, SETTING_LO, SETTING_HI};
 Mode_operation mode_operation = IDLE;
 enum Selected_Term {LO, HI};
 Selected_Term selected_term = LO;
@@ -68,8 +73,8 @@ short val_LO = 0, val_HI = 0;
 
 void setup() {
   Serial.begin(9600);
-  //while (!Serial) {;}
-  delay(1000);
+  while (!Serial) {;}
+  delay(100);
 
   // Init LCD_I2C
   lcd.init(); lcd.setBacklight(255); lcd.clear(); lcd.noCursor();
@@ -96,19 +101,51 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_SW_NEG), button_neg_changed, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_SW_POS), button_pos_changed, CHANGE);
 
+  // リレー初期化
+  pinMode(PIN_RELAY, OUTPUT);
+  mode_relay = OFF;
+  digitalWrite(PIN_RELAY, LOW);
+
+  // MAX31855の初期化
+  delay(1000); // wait for MAX chip to stabilize
+  if (!thermocouple.begin()) {
+    mode_operation = ERROR; // 動作状態をエラーにする
+  }
+
   // LCD表示
   display_mode_operation();
   display_val_LO(); display_val_HI();
-  display_curr_temp(12.345);
-
+  display_curr_temp();
+  display_mode_relay();
 }
 
 void loop() {
+  // 熱電対の状態監視
+  if (thermocouple.readError() != 0) { // なんらかのエラーが発生してる
+    mode_operation = ERROR; // エラー状態モードに遷移
+    mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを緊急断
+    display_mode_operation();
+  } else if (mode_operation == ERROR) { // 現状エラー状態モードだがエラーは発生していない
+    mode_operation = IDLE; // アイドル状態に遷移
+    display_mode_operation();
+  }
+
   // 現在温度の表示
   if (millis() > msec_update_curr_temp_last + 500) { // 前回更新時から500msec以上経過した
-    curr_temp += (random(3)-1.0)/10.0;
     msec_update_curr_temp_last = millis();
-    display_curr_temp(curr_temp);
+    display_curr_temp();
+  }
+
+  // 温調
+  if (mode_operation == ACTIVE) {
+    double temp = thermocouple.readCelsius();
+    if (temp < val_LO) { // 現在温度がL設定を下回ってる
+      mode_relay = ON; digitalWrite(PIN_RELAY, HIGH); // リレーを入
+      display_mode_relay();
+    } else if (temp > val_HI) { // 現在温度がH設定を上回ってる
+      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを断
+      display_mode_relay();
+    }
   }
 
   // ボタン動作のロジック
@@ -194,32 +231,32 @@ void display_mode_operation() {
     lcd.setCursor(7, 1); lcd.print("]["); lcd.write(byte(cc_H)); lcd.print(" ");
     lcd.setCursor(15, 1); lcd.print("]");
   switch (mode_operation) {
+    case ERROR:
+      lcd.createChar(cc_OP_0, cmap_invE); lcd.createChar(cc_OP_1, cmap_invR); lcd.createChar(cc_OP_2, cmap_invR); 
+      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
+      break;
     case IDLE:
       lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); 
       lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.noCursor(); lcd.noBlink();
       break;
     case ACTIVE:
       lcd.createChar(cc_OP_0, cmap_invA); lcd.createChar(cc_OP_1, cmap_invC); lcd.createChar(cc_OP_2, cmap_invT); 
       lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.noCursor(); lcd.noBlink();
       break;
     case SETTING_TERM:
       lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
       lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.setCursor((selected_term==LO)?1:9, 1); lcd.cursor(); lcd.blink();
       break;
     case SETTING_LO:
       lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
       lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.setCursor(6, 1); lcd.cursor(); lcd.noBlink();
       break;
     case SETTING_HI:
       lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); 
       lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.setCursor(14, 1); lcd.cursor(); lcd.noBlink();
       break;
   }
+  control_cursor();
 }
 
 void display_val_LO() {
@@ -244,17 +281,46 @@ void display_val_HI() {
   lcd.setCursor(14, 1);
 }
 
-void display_curr_temp(double temp) {
+void display_curr_temp() {
   lcd.setCursor(4, 0);
-  if (       temp <= -100.0) { lcd.print(temp);
-  } else if (temp <= -10.0 ) { lcd.print("- "); lcd.print(abs(temp)); 
-  } else if (temp <    0.0 ) { lcd.print("-  "); lcd.print(abs(temp));
-  } else if (temp <   10.0 ) { lcd.print("+  "); lcd.print(temp);
-  } else if (temp <  100.0 ) { lcd.print("+ "); lcd.print(temp);
-  } else {                     lcd.print("+"); lcd.print(temp); }
-  lcd.setCursor(10, 0); lcd.write(byte(cc_degree)); lcd.print("C");
-  // カーソル位置の制御
+  if (mode_operation == ERROR) { // エラー状態モードなら
+    lcd.print("        "); lcd.setCursor(5, 0);
+    uint8_t e = thermocouple.readError();
+    if (e & MAX31855_FAULT_OPEN) lcd.print("TO"); // 回路オープン
+    if (e & MAX31855_FAULT_SHORT_GND) lcd.print("SG"); // GNDショート
+    if (e & MAX31855_FAULT_SHORT_VCC) lcd.print("SV"); // VCCショート
+  } else { // エラー状態モードでなければ
+    double temp = thermocouple.readCelsius();
+    if (       temp <= -100.0) { lcd.print(temp);
+    } else if (temp <= -10.0 ) { lcd.print("- "); lcd.print(abs(temp)); 
+    } else if (temp <    0.0 ) { lcd.print("-  "); lcd.print(abs(temp));
+    } else if (temp <   10.0 ) { lcd.print("+  "); lcd.print(temp);
+    } else if (temp <  100.0 ) { lcd.print("+ "); lcd.print(temp);
+    } else {                     lcd.print("+"); lcd.print(temp); }
+    lcd.setCursor(10, 0); lcd.write(byte(cc_degree)); lcd.print("C");
+  }
+  control_cursor();  
+}
+
+void display_mode_relay() {
+  switch (mode_relay) {
+    case OFF:
+      lcd.createChar(cc_RMODE, cmap_invF);
+      lcd.setCursor(13, 0); lcd.write(byte(cc_O)); lcd.write(byte(cc_RMODE)); lcd.write(byte(cc_RMODE));
+      break;
+    case ON:
+      lcd.createChar(cc_RMODE, cmap_invN);
+      lcd.setCursor(13, 0); lcd.print(" "); lcd.write(byte(cc_O)); lcd.write(byte(cc_RMODE));
+      break;
+    default: break;
+  }
+  control_cursor();
+}
+
+void control_cursor() { // カーソル位置の制御
   switch (mode_operation) {
+    case IDLE: case ACTIVE:
+      lcd.noCursor(); lcd.noBlink(); break;
     case SETTING_TERM:
       lcd.setCursor((selected_term==LO)?1:9, 1); lcd.cursor(); lcd.blink(); break;
     case SETTING_LO:
@@ -264,7 +330,6 @@ void display_curr_temp(double temp) {
     default: break;
   }
 }
-
 
 // ACTボタンの動作定義
 void on_button_act_click() {
@@ -293,7 +358,7 @@ void on_button_act_click() {
       mode_operation = SETTING_TERM;
       display_mode_operation();
       break;
-    default:
+    case ERROR: default:
       display_mode_operation();
       break;
   }
