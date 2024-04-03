@@ -37,7 +37,7 @@ byte cmap_invT[8] =   {0b11111, 0b10001, 0b11011, 0b11011, 0b11011, 0b11011, 0b1
 #define MAXCS     10
 Adafruit_MAX31855 thermocouple(MAXCS);
 
-double curr_temp;
+double curr_temp, tmp_temp;
 unsigned long msec_update_curr_temp_last = 0;
 
 // リレー
@@ -125,15 +125,19 @@ void loop() {
   // 温度の表示と制御
   if (millis() > msec_update_curr_temp_last + 500) { // 前回更新時から500msec以上経過した
     // 熱電対の状態監視
-    curr_temp = thermocouple.readCelsius();
-    if (isnan(curr_temp)) { // 温度が取得できてなかった
-      mode_operation = ERROR; // エラー状態モードに遷移
-      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // リレーを緊急断
-      display_mode_operation();
-    } else if (mode_operation == ERROR) { // 現状エラー状態モードだが温度を読めた（のでエラーから回復した）
-      mode_operation = IDLE; // アイドル状態に遷移
-      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // 念のためリレーを断
-      display_mode_operation();
+    tmp_temp = thermocouple.readCelsius(); // 仮変数に温度を取得
+    if (isnan(tmp_temp)) { // 温度が取得できていなかった
+      mode_relay = OFF; digitalWrite(PIN_RELAY, LOW); // とりあえずリレーを緊急断
+      if (mode_operation == IDLE) { // 現在がアイドル状態モードなら
+        mode_operation = ERROR; // エラー状態モードに遷移
+        display_mode_operation();
+      } // ※ SETおよびACTならモードは維持する
+    } else { // 温度が取得できていた
+      curr_temp = tmp_temp; // 読めた温度を本番変数へ移す
+      if (mode_operation == ERROR) { // 現在がエラー状態モードなら
+        mode_operation = IDLE; // アイドル状態モードに遷移
+        display_mode_operation();
+      } // ※ SETおよびACTならモードは維持する
     }
 
     // 温度表示
