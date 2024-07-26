@@ -46,7 +46,7 @@ enum Mode_Relay {OFF, ON};
 Mode_Relay mode_relay = OFF;
 
 // 動作定義
-enum Mode_operation {ERROR, IDLE, ACTIVE, SEL_LO, SEL_HI, SET_LO, SET_HI};
+enum Mode_operation {ERROR, IDLE, ACTIVE, SEL_LO, SEL_HI, SET_LO, SET_HI, PSEUDO_IDLE, PSEUDO_SEL_LO};
 Mode_operation mode_operation = IDLE;
 
 // ボタン定義
@@ -185,11 +185,11 @@ void display_mode_operation() {
   switch (mode_operation) {
     case ERROR:
       lcd.createChar(cc_OP_0, cmap_invE); lcd.createChar(cc_OP_1, cmap_invR); lcd.createChar(cc_OP_2, cmap_invR); break;
-    case IDLE:
+    case IDLE: case PSEUDO_IDLE:
       lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); break;
     case ACTIVE:
       lcd.createChar(cc_OP_0, cmap_invA); lcd.createChar(cc_OP_1, cmap_invC); lcd.createChar(cc_OP_2, cmap_invT); break;
-    case SEL_LO: case SEL_HI: case SET_LO: case SET_HI:
+    case SEL_LO: case SEL_HI: case SET_LO: case SET_HI: case PSEUDO_SEL_LO:
       lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); break;
   }
   lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
@@ -255,9 +255,9 @@ void display_mode_relay() {
 
 void control_cursor() { // カーソル位置の制御
   switch (mode_operation) {
-    case IDLE: case ACTIVE:
+    case IDLE: case ACTIVE: case PSEUDO_IDLE:
       lcd.noCursor(); lcd.noBlink(); break;
-    case SEL_LO:
+    case SEL_LO: case PSEUDO_SEL_LO:
       lcd.setCursor(1, 1); lcd.cursor(); lcd.blink(); break;
     case SEL_HI:
       lcd.setCursor(9, 1); lcd.cursor(); lcd.blink(); break;
@@ -313,16 +313,13 @@ void on_act_clicked() {
 void on_act_held() {
   if (mutex != ACT) return; // ミューテックスが取れてなければ何もしない
   switch (mode_operation) {
-    case IDLE: // 表示だけをSEL_LOモードにする
-      lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT);
-      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2));
-      lcd.setCursor(1, 1); lcd.cursor(); lcd.blink();
+    case IDLE: // 表示だけをSEL_LOモードにするためにPSEUDO-SEL_LOモードに遷移
+      mode_operation = PSEUDO_SEL_LO;
+      display_mode_operation();
       break;
-    case SEL_LO: // 表示だけIDLEモードにする
-    case SEL_HI: // 表示だけIDLEモードにする
-      lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); break;
-      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.noCursor(); lcd.noBlink();
+    case SEL_LO: case SEL_HI: // 表示だけIDLEモードにするためにPSEUDO_IDLEモードに遷移
+      mode_operation = PSEUDO_IDLE;
+      display_mode_operation();
       break;
     case SET_LO: // LO値だけを変更前の値に書き戻す
       EEPROM.get(0, val_LO); // 変更前のLO値をEEPROMから読み出す
@@ -339,12 +336,11 @@ void on_act_held() {
 void on_act_longclicked() {
   if (mutex != ACT) return; // ミューテックスが取れてなければ何もしない
   switch (mode_operation) {
-    case IDLE: // SEL_LOモードに遷移
+    case IDLE: case PSEUDO_SEL_LO: // SEL_LOモードに遷移
       mode_operation = SEL_LO;
       display_mode_operation();
       break;
-    case SEL_LO: // IDLEモードに遷移
-    case SEL_HI: // IDLEモードに遷移
+    case SEL_LO: case SEL_HI: case PSEUDO_IDLE: // IDLEモードに遷移
       mode_operation = IDLE;
       display_mode_operation();
       break;
