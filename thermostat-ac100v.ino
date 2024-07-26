@@ -46,36 +46,23 @@ enum Mode_Relay {OFF, ON};
 Mode_Relay mode_relay = OFF;
 
 // 動作定義
-enum Mode_operation {ERROR, IDLE, ACTIVE, SEL_LO, SEL_HI, SET_LO, SET_HI};
+enum Mode_operation {ERROR, IDLE, ACTIVE, SEL_LO, SEL_HI, SET_LO, SET_HI, PSEUDO_IDLE, PSEUDO_SEL_LO};
 Mode_operation mode_operation = IDLE;
 
 // ボタン定義
-#include "Key.h" // 汎用キーライブラリ
+#include <VersatileSwitch.h> // 多用途スイッチライブラリ
 
 #define PIN_SW_ACT 0
 #define PIN_SW_NEG 1
 #define PIN_SW_POS 7
 
-Key key_ACT(PIN_SW_ACT);
-Key key_NEG(PIN_SW_NEG);
-Key key_POS(PIN_SW_POS);
-
-/*
-enum Status_Button {RELEASE, PRESS, HOLD, CLICK, LONG};
-volatile Status_Button status_button_neg = RELEASE,
-                        status_button_pos = RELEASE,
-                        status_button_act = RELEASE;
-*/
+VersatileSwitch btn_ACT(PIN_SW_ACT);
+VersatileSwitch btn_NEG(PIN_SW_NEG);
+VersatileSwitch btn_POS(PIN_SW_POS);
 
 // ボタンの排他制御
 enum Mutex {NONE, ACT, NEG, POS};
 volatile Mutex mutex = NONE;
-
-/*
-volatile unsigned long msec_button_neg_last = 0,
-                        msec_button_pos_last = 0,
-                        msec_button_act_last = 0;
-*/
 
 // 変数
 short val_LO = 0, val_HI = 0; 
@@ -100,24 +87,30 @@ void setup() {
   EEPROM.get(2, val_HI); // 2-3番地に(short)HI
 
   // ボタンのコールバック登録
-  key_ACT.attachPinInterrupt([]{key_ACT.paralyze();});
-  key_ACT.attachCallback_Pressed(on_act_pressed);
-  key_ACT.attachCallback_Clicked(on_act_clicked);
-  key_ACT.attachCallback_Holded(on_act_holded);
-  key_ACT.attachCallback_LongClicked(on_act_longclicked);
-  key_ACT.attachCallback_Released(on_act_released);
+  btn_ACT.attachCallback_Pressed(on_act_pressed);
+  btn_ACT.attachCallback_Clicked(on_act_clicked);
+  btn_ACT.attachCallback_Held(on_act_held);
+  btn_ACT.attachCallback_LongClicked(on_act_longclicked);
 
-  key_NEG.attachPinInterrupt([]{key_NEG.paralyze();});
-  key_NEG.attachCallback_Pressed(on_neg_pressed);
-  key_NEG.attachCallback_Clicked(on_neg_clicked);
-  key_NEG.attachCallback_Repeated(on_neg_repeated);
-  key_NEG.attachCallback_Released(on_neg_released);
+  btn_NEG.attachCallback_Pressed(on_neg_pressed);
+  btn_NEG.attachCallback_Clicked(on_neg_clicked);
+  btn_NEG.attachCallback_Repeated(on_neg_repeated);
+  btn_NEG.attachCallback_LongClicked(on_neg_longclicked);
 
-  key_POS.attachPinInterrupt([]{key_POS.paralyze();});
-  key_POS.attachCallback_Pressed(on_pos_pressed);
-  key_POS.attachCallback_Clicked(on_pos_clicked);
-  key_POS.attachCallback_Repeated(on_pos_repeated);
-  key_POS.attachCallback_Released(on_pos_released);
+  btn_POS.attachCallback_Pressed(on_pos_pressed);
+  btn_POS.attachCallback_Clicked(on_pos_clicked);
+  btn_POS.attachCallback_Repeated(on_pos_repeated);
+  btn_POS.attachCallback_LongClicked(on_pos_longclicked);
+
+  // スイッチが離された際にミューテックスを解除する必要があるのだが、
+  // それにReleasedコールバックを使うことはできない。
+  // ReleasedはClickedやLongClickedの「前」にコールバックされるので、
+  // Releasedでミューテックスを解除すると、
+  // その後のClickedやLongClickedのコールバックにて
+  // ミューテックスが取れていなかったことになり処理ができなくなる
+  // そのため、btn_NEGとbtn_POSでは長押しに機能はないのだが、
+  // リピート後に離されたときにミューテックスを解除するためだけに
+  // LongClickedをアタッチする必要がある
 
   mutex = NONE; // 排他制御状態の初期化
   mode_operation = IDLE; // IDEL状態で初期化
@@ -177,11 +170,11 @@ void loop() {
     }
   }
   
-  // ボタン動作のチェック
-  key_ACT.check(); // ACTボタンのチェック
-  key_NEG.check(); // NEGボタンのチェック
-  key_POS.check(); // POSボタンのチェック
-  
+  // ボタン動作のポーリング
+  btn_ACT.poll();
+  btn_NEG.poll();
+  btn_POS.poll();
+
 } // END of loop
 
 // LCD表示
@@ -192,11 +185,11 @@ void display_mode_operation() {
   switch (mode_operation) {
     case ERROR:
       lcd.createChar(cc_OP_0, cmap_invE); lcd.createChar(cc_OP_1, cmap_invR); lcd.createChar(cc_OP_2, cmap_invR); break;
-    case IDLE:
+    case IDLE: case PSEUDO_IDLE:
       lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); break;
     case ACTIVE:
       lcd.createChar(cc_OP_0, cmap_invA); lcd.createChar(cc_OP_1, cmap_invC); lcd.createChar(cc_OP_2, cmap_invT); break;
-    case SEL_LO: case SEL_HI: case SET_LO: case SET_HI:
+    case SEL_LO: case SEL_HI: case SET_LO: case SET_HI: case PSEUDO_SEL_LO:
       lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT); break;
   }
   lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
@@ -262,9 +255,9 @@ void display_mode_relay() {
 
 void control_cursor() { // カーソル位置の制御
   switch (mode_operation) {
-    case IDLE: case ACTIVE:
+    case IDLE: case ACTIVE: case PSEUDO_IDLE:
       lcd.noCursor(); lcd.noBlink(); break;
-    case SEL_LO:
+    case SEL_LO: case PSEUDO_SEL_LO:
       lcd.setCursor(1, 1); lcd.cursor(); lcd.blink(); break;
     case SEL_HI:
       lcd.setCursor(9, 1); lcd.cursor(); lcd.blink(); break;
@@ -278,7 +271,6 @@ void control_cursor() { // カーソル位置の制御
 
 // ACTボタンのコールバック関数
 void on_act_pressed() {if (mutex == NONE) mutex = ACT;} // ミューテックスをACTが取得
-void on_act_released() {if (mutex == ACT) mutex = NONE;} // ミューテックスが取れていたならそれを解放する
 
 void on_act_clicked() {
   if (mutex != ACT) return; // ミューテックスが取れてなければ何もしない
@@ -315,21 +307,19 @@ void on_act_clicked() {
       display_mode_operation();
       break;
   }
+  mutex = NONE; // スイッチが離されたのでミューテックスを解除する
 }
 
-void on_act_holded() {
+void on_act_held() {
   if (mutex != ACT) return; // ミューテックスが取れてなければ何もしない
   switch (mode_operation) {
-    case IDLE: // 表示だけをSEL_LOモードにする
-      lcd.createChar(cc_OP_0, cmap_invS); lcd.createChar(cc_OP_1, cmap_invE); lcd.createChar(cc_OP_2, cmap_invT);
-      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2));
-      lcd.setCursor(1, 1); lcd.cursor(); lcd.blink();
+    case IDLE: // 表示だけをSEL_LOモードにするためにPSEUDO-SEL_LOモードに遷移
+      mode_operation = PSEUDO_SEL_LO;
+      display_mode_operation();
       break;
-    case SEL_LO: // 表示だけIDLEモードにする
-    case SEL_HI: // 表示だけIDLEモードにする
-      lcd.createChar(cc_OP_0, cmap_invI); lcd.createChar(cc_OP_1, cmap_invD); lcd.createChar(cc_OP_2, cmap_invL); break;
-      lcd.setCursor(0, 0); lcd.write(byte(cc_OP_0)); lcd.write(byte(cc_OP_1)); lcd.write(byte(cc_OP_2)); 
-      lcd.noCursor(); lcd.noBlink();
+    case SEL_LO: case SEL_HI: // 表示だけIDLEモードにするためにPSEUDO_IDLEモードに遷移
+      mode_operation = PSEUDO_IDLE;
+      display_mode_operation();
       break;
     case SET_LO: // LO値だけを変更前の値に書き戻す
       EEPROM.get(0, val_LO); // 変更前のLO値をEEPROMから読み出す
@@ -346,22 +336,21 @@ void on_act_holded() {
 void on_act_longclicked() {
   if (mutex != ACT) return; // ミューテックスが取れてなければ何もしない
   switch (mode_operation) {
-    case IDLE: // SEL_LOモードに遷移
+    case IDLE: case PSEUDO_SEL_LO: // SEL_LOモードに遷移
       mode_operation = SEL_LO;
       display_mode_operation();
       break;
-    case SEL_LO: // IDLEモードに遷移
-    case SEL_HI: // IDLEモードに遷移
+    case SEL_LO: case SEL_HI: case PSEUDO_IDLE: // IDLEモードに遷移
       mode_operation = IDLE;
       display_mode_operation();
       break;
     default: break;
   }
+  mutex = NONE; // スイッチが離されたのでミューテックスを解除する
 }
 
 // NEGボタンのコールバック関数
 void on_neg_pressed() {if (mutex == NONE) mutex = NEG;} // ミューテックスをNEGが取得
-void on_neg_released() {if (mutex == NEG) mutex = NONE;} // ミューテックスが取れていたならそれを解放する
 
 void on_neg_clicked() {
   if (mutex != NEG) return; // ミューテックスが取れてなければ何もしない
@@ -380,6 +369,7 @@ void on_neg_clicked() {
       break;
     default: break;
   }
+  mutex = NONE; // スイッチが離されたのでミューテックスを解除する
 }
 
 void on_neg_repeated() {
@@ -397,9 +387,10 @@ void on_neg_repeated() {
   }
 }
 
+void on_neg_longclicked() {if (mutex == NEG) mutex = NONE;} // ミューテックスが取れていたならそれを解除する
+
 // POSボタンのコールバック関数
 void on_pos_pressed() {if (mutex == NONE) mutex = POS;} // ミューテックスをPOSが取得
-void on_pos_released() {if (mutex == POS) mutex = NONE;} // ミューテックスが取れていたならそれを解放する
 
 void on_pos_clicked() {
   if (mutex != POS) return; // ミューテックスが取れてなければ何もしない
@@ -418,6 +409,7 @@ void on_pos_clicked() {
       break;
     default: break;
   }
+  mutex = NONE; // スイッチが離されたのでミューテックスを解除する
 }
 
 void on_pos_repeated() {
@@ -435,3 +427,4 @@ void on_pos_repeated() {
   }
 }
 
+void on_pos_longclicked() {if (mutex == POS) mutex = NONE;} // ミューテックスが取れていたならそれを解除する
