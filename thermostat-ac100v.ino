@@ -34,14 +34,14 @@ byte cmap_invT[8] =   {0b11111, 0b10001, 0b11011, 0b11011, 0b11011, 0b11011, 0b1
 // 熱電対
 #include <SPI.h>
 #include "Adafruit_MAX31855.h"
-#define MAXCS     10
+#define MAXCS     18
 Adafruit_MAX31855 thermocouple(MAXCS);
 
 double curr_temp, tmp_temp;
 unsigned long msec_update_curr_temp_last = 0;
 
 // リレー
-#define PIN_RELAY 9
+#define PIN_RELAY 10
 enum Mode_Relay {OFF, ON};
 Mode_Relay mode_relay = OFF;
 
@@ -52,9 +52,9 @@ Mode_operation mode_operation = IDLE;
 // ボタン定義
 #include <VersatileSwitch.h> // 多用途スイッチライブラリ
 
-#define PIN_SW_ACT 0
-#define PIN_SW_NEG 1
-#define PIN_SW_POS 7
+#define PIN_SW_ACT 8
+#define PIN_SW_NEG 7
+#define PIN_SW_POS 9
 
 VersatileSwitch btn_ACT(PIN_SW_ACT);
 VersatileSwitch btn_NEG(PIN_SW_NEG);
