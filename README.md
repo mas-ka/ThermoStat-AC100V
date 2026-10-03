@@ -5,7 +5,7 @@ Arduino Pro Micro (5V / ATmega32U4) と K型熱電対アンプモジュール（
 AC-DCコンバータを内蔵しており、商用AC100V電源コードを接続するだけで内部回路および接続した負荷機器へ一括給電・制御が可能なスタンドアロン設計となっています。
 
 <p align="center">
-  <img src="docs/box_preview.png" alt="外観プレビュー" width="360">
+  <img src="PXL_20250612_075339866.jpg" alt="ThermoStat-AC100V 外観" width="480">
 </p>
 
 ---
@@ -147,7 +147,6 @@ AC-DCコンバータを内蔵しており、商用AC100V電源コードを接続
   - `docs/ThermoStat-AC100V_v2_電気回路図.CE3` (BSch3V回路図ソース)
 - **筐体CADデータ**:
   - `docs/Thermostat_AC100V_v2-BOX.rsdocx` (DesignSpark Mechanical / SpaceClaim 3D CADデータ)
-  - `docs/box_preview.png` (外観プレビュー画像)
 
 ---
 
